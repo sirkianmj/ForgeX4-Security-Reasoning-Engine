@@ -1,0 +1,757 @@
+{
+  "name": "ForgeX4 Security Reasoning Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -720,
+        -304
+      ],
+      "id": "378df7dd-21f8-46c8-a7f8-00f620716823",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -640,
+        -16
+      ],
+      "id": "b9e2698a-2ce1-497b-93f4-9e0bbc866c58",
+      "name": "CISA Security Advisories"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const data = item.json;\n\n  const title = data.title || '';\n  const url = data.link || '';\n  const publishedAt = data.pubDate || '';\n\n  // Prefer RSS GUID as the stable advisory identifier.\n  // Fall back to the URL when GUID is unavailable.\n  const advisoryId =\n    data.guid ||\n    url ||\n    title;\n\n  return {\n    json: {\n      source: 'CISA',\n      event_type: 'security_advisory',\n\n      advisory_id: advisoryId,\n\n      title,\n      url,\n\n      published_at: publishedAt,\n\n      summary:\n        data.contentSnippet ||\n        data.content ||\n        data.summary ||\n        '',\n\n      ingested_at: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        16
+      ],
+      "id": "bc5d5a7c-c81a-4cb3-bdd1-3d2e2329db10",
+      "name": "Normalize Security Event"
+    },
+    {
+      "parameters": {
+        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "resultsPerPage",
+              "value": "20"
+            },
+            {
+              "name": "startIndex",
+              "value": "0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -528,
+        -384
+      ],
+      "id": "110db46d-a6ff-462f-ae77-07058805e375",
+      "name": "NVD Vulnerability Intelligence"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "vulnerabilities",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -304,
+        -384
+      ],
+      "id": "16e4d2f8-64d0-44d9-9eee-c642befd7725",
+      "name": "Split NVD Vulnerabilities"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const v = item.json;\n  const cve = v.cve || {};\n\n  const descriptions = Array.isArray(cve.descriptions)\n    ? cve.descriptions\n    : [];\n\n  const englishDescription =\n    descriptions.find(d => d.lang === 'en')?.value || '';\n\n  const metrics = cve.metrics || {};\n\n  const cvss =\n    metrics.cvssMetricV40?.[0]?.cvssData ||\n    metrics.cvssMetricV31?.[0]?.cvssData ||\n    metrics.cvssMetricV30?.[0]?.cvssData ||\n    metrics.cvssMetricV2?.[0]?.cvssData ||\n    null;\n\n  return {\n    json: {\n      source: 'NVD',\n      event_type: 'vulnerability',\n\n      vulnerability_id: cve.id || '',\n\n      title: cve.id || '',\n\n      url: cve.id\n        ? `https://nvd.nist.gov/vuln/detail/${cve.id}`\n        : '',\n\n      published_at: cve.published || '',\n      last_modified_at: cve.lastModified || '',\n\n      summary: englishDescription,\n\n      cvss: cvss?.baseScore ?? null,\n      severity: cvss?.baseSeverity || null,\n\n      vector: cvss?.vectorString || '',\n\n      references: Array.isArray(cve.references)\n        ? cve.references\n            .map(ref => ref.url)\n            .filter(Boolean)\n        : [],\n\n      ingested_at: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        -384
+      ],
+      "id": "762040e6-bc43-4edc-b22b-8c0d3fd5b6aa",
+      "name": "Normalize NVD Vulnerability"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        448,
+        -384
+      ],
+      "id": "06b5429c-52d6-4aa6-a3e5-2b094e3f00a3",
+      "name": "Merge Security Intelligence"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const data = item.json;\n\n  const identity =\n    data.vulnerability_id\n      ? `CVE:${data.vulnerability_id}`\n      : `URL:${data.url}`;\n\n  return {\n    json: {\n      ...data,\n      event_id: identity\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        -384
+      ],
+      "id": "9f65720b-10e9-4f52-92aa-f8b941319521",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const data = item.json;\n\n  const cvss = Number(data.cvss) || 0;\n\n  let severityScore = 0;\n\n  if (cvss >= 9) {\n    severityScore = 40;\n  } else if (cvss >= 7) {\n    severityScore = 30;\n  } else if (cvss >= 4) {\n    severityScore = 20;\n  } else if (cvss > 0) {\n    severityScore = 10;\n  }\n\n  const exploitabilityScore =\n    data.vector?.includes('/AV:N') ? 25 : 10;\n\n  const interactionScore =\n    data.vector?.includes('/UI:N') ? 15 : 5;\n\n  const impactScore =\n    cvss >= 9 ? 20 :\n    cvss >= 7 ? 15 :\n    cvss >= 4 ? 10 : 5;\n\n  const riskScore =\n    severityScore +\n    exploitabilityScore +\n    interactionScore +\n    impactScore;\n\n  let priority = 'LOW';\n\n  if (riskScore >= 80) {\n    priority = 'CRITICAL';\n  } else if (riskScore >= 60) {\n    priority = 'HIGH';\n  } else if (riskScore >= 40) {\n    priority = 'MEDIUM';\n  }\n\n  return {\n    json: {\n      ...data,\n\n      risk: {\n        score: riskScore,\n        priority,\n\n        factors: {\n          severity: severityScore,\n          exploitability: exploitabilityScore,\n          interaction: interactionScore,\n          impact: impactScore\n        }\n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        -144
+      ],
+      "id": "14f7fb42-211a-47ca-a0d0-c3127bea0a4e",
+      "name": "Deterministic Risk Assessment"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e5d611df-2699-4c73-a0ba-af7c69a38957",
+              "leftValue": "={{ $json.risk.score }}",
+              "rightValue": 60,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        1216,
+        -384
+      ],
+      "id": "3e63c8a8-347b-47c0-8274-7a296739fad0",
+      "name": "AI Analysis Gate"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the Security Intelligence Analyst of ForgeX4 SRE.\n\nYou are analyzing ONE vulnerability record from the NVD.\n\nYour analysis MUST be grounded exclusively in the supplied vulnerability record.\n\nDO NOT produce generic cybersecurity advice.\n\nDO NOT invent facts, attack techniques, affected products, exploitation status, threat actors, or mitigations that are not supported by the supplied data.\n\nFirst extract the concrete facts from the record.\n\nThen produce a concise technical assessment.\n\nThe vulnerability record is:\n\n{{ JSON.stringify($json) }}\n\nReturn ONLY valid JSON. Do not use Markdown fences.\n\nUse exactly this schema:\n\n{\n  \"vulnerability_id\": \"\",\n  \"title\": \"\",\n  \"cvss\": 0,\n  \"attack_vector\": \"\",\n  \"attack_complexity\": \"\",\n  \"authentication\": \"\",\n  \"impact\": \"\",\n  \"technical_analysis\": \"\",\n  \"exploitation_assessment\": \"\",\n  \"defensive_recommendation\": \"\",\n  \"linkedin_worthiness\": \"HIGH|MEDIUM|LOW\"\n}\n\nRules:\n\n1. vulnerability_id must come directly from the input.\n2. title must come directly from the input.\n3. cvss must come directly from the input.\n4. attack_vector must be derived only from the supplied CVSS vector.\n5. authentication must be derived only from the supplied vector.\n6. impact must reflect the supplied confidentiality, integrity, and availability values.\n7. technical_analysis must explain why THIS vulnerability is technically significant.\n8. exploitation_assessment must distinguish between \"vulnerable condition\" and \"confirmed exploitation\".\n9. defensive_recommendation must be based on the supplied vulnerability information. If specific remediation is not provided, say so explicitly.\n10. linkedin_worthiness should be HIGH only when this vulnerability contains a genuinely interesting security lesson, historically significant attack mechanism, severe impact, or strong relevance to security engineering.\n11. If information is missing, write \"Not provided\" rather than guessing.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1616,
+        -384
+      ],
+      "id": "d98d020b-ab39-4b0b-b055-8d6779e5036d",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        1744,
+        -192
+      ],
+      "id": "9e892340-7794-4632-88d7-0969eae1d945",
+      "name": "Gemini Security Analyst",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "yJtr3aNqFQC1yffe",
+          "name": "ForgeX4 Gemini"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ForgeX4 Security Intelligence Ranking Engine\n// Deterministic editorial ranking of AI-analyzed vulnerabilities\n\nconst analyzed = [];\n\nfor (const item of $input.all()) {\n  try {\n    let raw = item.json.text;\n\n    // Remove Markdown code fences if Gemini added them\n    raw = raw\n      .replace(/^```json\\s*/i, '')\n      .replace(/^```\\s*/i, '')\n      .replace(/\\s*```$/i, '')\n      .trim();\n\n    const analysis = JSON.parse(raw);\n\n    analyzed.push({\n      ...analysis\n    });\n\n  } catch (error) {\n    // Ignore malformed AI outputs\n    continue;\n  }\n}\n\nif (analyzed.length === 0) {\n  return [];\n}\n\n\n// ─────────────────────────────────────────────\n// Deterministic Ranking\n// ─────────────────────────────────────────────\n\nfunction cvssScore(cvss) {\n  const value = Number(cvss) || 0;\n  return Math.min(value * 10, 100);\n}\n\nfunction exploitationScore(text = '') {\n  const value = text.toLowerCase();\n\n  if (\n    value.includes('confirmed exploitation') ||\n    value.includes('actively exploited') ||\n    value.includes('exploited in the wild')\n  ) {\n    return 100;\n  }\n\n  if (\n    value.includes('remote') ||\n    value.includes('arbitrary command') ||\n    value.includes('root privileges') ||\n    value.includes('privilege escalation')\n  ) {\n    return 75;\n  }\n\n  return 40;\n}\n\nfunction contentScore(analysis) {\n  let score = 0;\n\n  const text = (\n    (analysis.technical_analysis || '') +\n    ' ' +\n    (analysis.exploitation_assessment || '') +\n    ' ' +\n    (analysis.content_angle || '')\n  ).toLowerCase();\n\n  const strongSignals = [\n    'root',\n    'remote code execution',\n    'arbitrary command',\n    'privilege escalation',\n    'buffer overflow',\n    'authentication bypass',\n    'memory corruption',\n    'command execution',\n    'zero-day',\n    'security architecture'\n  ];\n\n  for (const signal of strongSignals) {\n    if (text.includes(signal)) {\n      score += 10;\n    }\n  }\n\n  return Math.min(score, 100);\n}\n\nfunction linkedinScore(value) {\n  switch ((value || '').toUpperCase()) {\n    case 'HIGH':\n      return 100;\n\n    case 'MEDIUM':\n      return 60;\n\n    default:\n      return 25;\n  }\n}\n\n\n// ─────────────────────────────────────────────\n// Calculate final deterministic score\n// ─────────────────────────────────────────────\n\nconst ranked = analyzed.map(analysis => {\n\n  const cvss = cvssScore(analysis.cvss);\n\n  const exploitation = exploitationScore(\n    analysis.exploitation_assessment\n  );\n\n  const content = contentScore(analysis);\n\n  const linkedin = linkedinScore(\n    analysis.linkedin_worthiness\n  );\n\n  const finalScore =\n    (cvss * 0.35) +\n    (exploitation * 0.25) +\n    (content * 0.25) +\n    (linkedin * 0.15);\n\n  return {\n    ...analysis,\n\n    ranking: {\n      score: Number(finalScore.toFixed(2)),\n      factors: {\n        cvss,\n        exploitation,\n        content_significance: content,\n        linkedin_worthiness: linkedin\n      }\n    }\n  };\n});\n\n\n// Highest score first\n\nranked.sort(\n  (a, b) =>\n    b.ranking.score -\n    a.ranking.score\n);\n\n\n// ─────────────────────────────────────────────\n// Keep ranked results\n// ─────────────────────────────────────────────\n\nreturn ranked.map((item, index) => ({\n  json: {\n    rank: index + 1,\n    ...item\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1952,
+        -112
+      ],
+      "id": "450926ed-8b1b-448c-b5fb-bd15e9bcc7cf",
+      "name": "Security Intelligence Ranking"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "eb78aee7-19e7-4994-8e4d-a1cd8157039f",
+              "leftValue": "={{ $json.ranking.score }}",
+              "rightValue": 60,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        2368,
+        -480
+      ],
+      "id": "c5402142-88bd-4525-b8ed-134a03ebf57a",
+      "name": "LinkedIn Content Gate"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the ForgeX4 Security Content Generator.\n\nYour task is to transform cybersecurity vulnerability intelligence into high-quality, technically accurate LinkedIn content.\n\nINPUT:\nThe input contains one or more vulnerability records produced by the ForgeX4 security intelligence pipeline.\n\nCORE TASK:\nFor EACH vulnerability record, create EXACTLY ONE independent LinkedIn post.\n\nNever combine multiple vulnerabilities into one post.\n\nIf the input contains 5 vulnerability records, return 5 content objects.\nIf the input contains 10 vulnerability records, return 10 content objects.\n\nEach vulnerability must receive its own:\n\n- linkedin_post\n- hook\n- key_takeaway\n- hashtags\n\n--------------------------------------------------\n1. FACTUAL ACCURACY\n--------------------------------------------------\n\nBase every statement strictly on the supplied vulnerability data.\n\nNEVER invent:\n\n- threat actors\n- exploitation campaigns\n- real-world attacks\n- affected products or versions not present in the input\n- patches\n- vendors\n- remediation steps\n- exploitation dates\n- statistics\n- security incidents\n- current exposure\n- attack techniques not supported by the data\n\nDo not infer facts simply because they are common for similar vulnerabilities.\n\nIf the input says exploitation is not confirmed, do not describe the vulnerability as actively exploited.\n\nUse precise language:\n\n\"The vulnerability allows...\"\n\"The flaw could allow...\"\n\"The supplied record describes...\"\n\nDo NOT write:\n\n\"Attackers are exploiting...\"\n\"This is being actively exploited...\"\n\"Threat actors are using...\"\nunless the supplied data explicitly confirms it.\n\n--------------------------------------------------\n2. PRESERVE TECHNICAL MEANING\n--------------------------------------------------\n\nDo not oversimplify the vulnerability.\n\nPreserve important technical details when available, including:\n\n- CVE\n- CVSS\n- attack vector\n- attack complexity\n- authentication requirements\n- affected component\n- privilege level\n- vulnerability mechanism\n- confidentiality impact\n- integrity impact\n- availability impact\n\nOnly mention details that actually exist in the supplied data.\n\nDo not manufacture technical explanations.\n\nIf the source description is uncertain, preserve that uncertainty.\n\nFor example, if the source says:\n\n\"possibly related to...\"\n\ndo not rewrite it as:\n\n\"the vulnerability is caused by...\"\n\n--------------------------------------------------\n3. HISTORICAL VULNERABILITIES\n--------------------------------------------------\n\nMany vulnerabilities may be decades old.\n\nWhen the vulnerability is clearly historical:\n\n- make the historical context clear\n- do not present it as a modern active threat\n- do not imply that the affected legacy software is currently widespread\n- use the vulnerability as a technical case study\n- focus on the underlying engineering or security principle\n\nThe historical context should add value rather than dominate the post.\n\n--------------------------------------------------\n4. LINKEDIN POST\n--------------------------------------------------\n\nCreate ONE polished LinkedIn post for each vulnerability.\n\nTarget audience:\n\nCybersecurity professionals, security engineers, vulnerability researchers, system administrators, developers, and technically interested professionals.\n\nThe post should feel like it was written by a knowledgeable cybersecurity practitioner.\n\nRecommended structure:\n\nHOOK\n↓\nWhat the vulnerability is\n↓\nHow it works technically\n↓\nWhy it matters\n↓\nSecurity lesson\n↓\nOptional discussion question\n\nDo not force every section if it would make the post unnatural.\n\nThe final post should generally be concise and readable on LinkedIn.\n\nAvoid unnecessary repetition of the CVE identifier.\n\nDo not restate the entire vulnerability record.\n\nSelect the most interesting technical details instead.\n\n--------------------------------------------------\n5. MAKE EACH POST DIFFERENT\n--------------------------------------------------\n\nDo NOT use the same writing template for every vulnerability.\n\nThe vulnerabilities may differ significantly.\n\nChoose the most interesting angle based on the actual vulnerability.\n\nPossible angles include:\n\n- unexpected root access\n- authentication bypass\n- dangerous default configuration\n- privilege escalation\n- trust boundary failure\n- insecure command handling\n- memory corruption\n- weak permission checking\n- insecure administrative tooling\n- legacy architecture\n- network exposure\n- local privilege boundaries\n\nFor example:\n\nA debug-command vulnerability should focus on dangerous administrative functionality.\n\nA trusted-host vulnerability should focus on trust boundaries.\n\nA buffer overflow should focus on memory corruption and input boundaries.\n\nA local privilege escalation should focus on privilege separation.\n\nDo not force unrelated vulnerabilities into the same narrative.\n\n--------------------------------------------------\n6. HOOK\n--------------------------------------------------\n\nCreate a short, strong hook.\n\nThe hook must be directly connected to the vulnerability.\n\nGood hooks are:\n\n- technically specific\n- intriguing\n- concise\n- natural\n\nAvoid generic hooks such as:\n\n\"Cybersecurity is more important than ever.\"\n\n\"Another day, another vulnerability.\"\n\n\"This vulnerability highlights the importance of security.\"\n\n\"Security is everyone's responsibility.\"\n\nDo not use misleading clickbait.\n\nDo not reveal the entire conclusion in the hook.\n\n--------------------------------------------------\n7. TECHNICAL DEPTH\n--------------------------------------------------\n\nThe post should be understandable without being shallow.\n\nExplain the technical mechanism in plain professional language.\n\nFor example, instead of merely saying:\n\n\"This vulnerability caused privilege escalation.\"\n\nPrefer something like:\n\n\"The flaw allowed a local user to interact with a privileged component in a way that resulted in root-level access.\"\n\nBut only use such an explanation when supported by the supplied data.\n\nTechnical accuracy is more important than sounding sophisticated.\n\n--------------------------------------------------\n8. SECURITY LESSON\n--------------------------------------------------\n\nExtract ONE specific lesson from the vulnerability.\n\nThe lesson should be directly connected to its root cause.\n\nExamples:\n\n- secure defaults\n- privilege separation\n- authentication boundaries\n- trust boundaries\n- input validation\n- memory safety\n- access control\n- least privilege\n- secure configuration\n- administrative interface exposure\n\nDo not make the lesson generic.\n\nAvoid repeatedly writing:\n\n\"This vulnerability highlights the importance of...\"\n\nInstead, state the lesson directly.\n\n--------------------------------------------------\n9. DISCUSSION QUESTION\n--------------------------------------------------\n\nA discussion question is OPTIONAL.\n\nUse one only when it naturally encourages meaningful cybersecurity discussion.\n\nIf used, it should be specific to the vulnerability.\n\nGood:\n\n\"How do you detect exposed administrative interfaces before production deployment?\"\n\nWeak:\n\n\"What do you think?\"\n\n\"Thoughts?\"\n\n\"Have you seen this before?\"\n\nDo not force a question into every post.\n\n--------------------------------------------------\n10. HASHTAGS\n--------------------------------------------------\n\nGenerate 3–5 relevant cybersecurity hashtags.\n\nChoose hashtags based on the vulnerability.\n\nExamples:\n\n#CyberSecurity\n#InfoSec\n#VulnerabilityManagement\n#NetworkSecurity\n#PrivilegeEscalation\n#ApplicationSecurity\n#MemorySafety\n#SecurityEngineering\n#AccessControl\n#LegacySystems\n\nDo not use hashtags unrelated to the vulnerability.\n\nIMPORTANT:\n\nHashtags MUST exist only in the \"hashtags\" output field.\n\nDo NOT place hashtags inside \"linkedin_post\".\n\n--------------------------------------------------\n11. STYLE\n--------------------------------------------------\n\nWrite naturally.\n\nThe content should NOT sound like generic AI-generated cybersecurity marketing.\n\nAvoid excessive use of:\n\n- \"stark reminder\"\n- \"serves as a reminder\"\n- \"highlights the importance\"\n- \"in today's digital landscape\"\n- \"critical importance\"\n- \"timeless lesson\"\n- \"powerful reminder\"\n\nThese phrases may occasionally be appropriate, but do not repeatedly use them across posts.\n\nAvoid dramatic language unless the supplied technical severity justifies it.\n\nDo not use unnecessary emojis.\n\nDo not use Markdown headings inside the LinkedIn post.\n\nDo not add \"Security Lesson:\" as a heading unless it genuinely improves readability.\n\n--------------------------------------------------\n12. OUTPUT FORMAT\n--------------------------------------------------\n\nReturn ONLY the structured output required by the schema.\n\nFor every vulnerability, return exactly:\n\n{\n  \"linkedin_post\": \"...\",\n  \"hook\": \"...\",\n  \"key_takeaway\": \"...\",\n  \"hashtags\": [\"...\", \"...\", \"...\"]\n}\n\nDo not add any other fields.\n\nDo not include:\n\n- CVE field\n- rank field\n- CVSS field\n- analysis field\n- explanation field\n- metadata\n- source field\n- confidence field\n\nDo not wrap the output in Markdown code fences.\n\nDo not add commentary before or after the structured output.\n\n--------------------------------------------------\nVULNERABILITY DATA\n--------------------------------------------------\n\n{{ JSON.stringify($json) }}",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2976,
+        -528
+      ],
+      "id": "8bf81195-767a-4148-af54-dc84afbf95b5",
+      "name": "LinkedIn Content Generator"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"linkedin_post\": {\n      \"type\": \"string\"\n    },\n    \"hook\": {\n      \"type\": \"string\"\n    },\n    \"key_takeaway\": {\n      \"type\": \"string\"\n    },\n    \"hashtags\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    }\n  }\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        3280,
+        -224
+      ],
+      "id": "dc75814b-a8f0-4d0c-936b-74b849bd54bd",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        3088,
+        -208
+      ],
+      "id": "292feefc-25ca-4f76-a103-f9a3049e6d42",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "yJtr3aNqFQC1yffe",
+          "name": "ForgeX4 Gemini"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAX_POSTS = 5;\n\nreturn items\n  .filter(item => Number(item.json.rank) <= MAX_POSTS)\n  .sort((a, b) => Number(a.json.rank) - Number(b.json.rank));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2176,
+        -112
+      ],
+      "id": "cb6731ae-b0af-47cb-80b8-d34bddf176aa",
+      "name": "Top N"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ForgeX4 — LinkedIn Content Quality Gate v2.1\n//\n// Pipeline:\n//\n// AI Output\n//      ↓\n// Normalization\n//      ↓\n// Metrics\n//      ↓\n// Hard-Fail Rules\n//      ↓\n// Weighted Scoring Engine\n//      ↓\n// Soft Warnings\n//      ↓\n// PASS / REVIEW / REJECT\n//\n// Input:\n//   { output: {...} }\n// OR\n//   { linkedin_post, hook, key_takeaway, hashtags }\n//\n// Important:\n// CVE is OPTIONAL.\n// CVE only provides a scoring bonus.\n//\n// ============================================================\n// CONFIGURATION\n// ============================================================\n\nconst CONFIG = {\n\n  // ----------------------------------------------------------\n  // Content\n  // ----------------------------------------------------------\n\n  minPostLength: 600,\n  recommendedPostLength: 750,\n  maxPostLength: 1500,\n\n  minWordCount: 90,\n  recommendedWordCount: 110,\n\n  // ----------------------------------------------------------\n  // Hashtags\n  // ----------------------------------------------------------\n\n  minHashtags: 3,\n  maxHashtags: 5,\n\n  // ----------------------------------------------------------\n  // Security vocabulary\n  // ----------------------------------------------------------\n\n  minSecurityTerms: 5,\n\n  // ----------------------------------------------------------\n  // Core fields\n  // ----------------------------------------------------------\n\n  minHookLength: 20,\n  minTakeawayLength: 30,\n\n  // ----------------------------------------------------------\n  // Generic AI writing\n  // ----------------------------------------------------------\n\n  maxGenericPhrasesBeforePenalty: 0,\n\n  // ----------------------------------------------------------\n  // Decision thresholds\n  // ----------------------------------------------------------\n\n  passScore: 85,\n  reviewScore: 70,\n\n  // ----------------------------------------------------------\n  // Weighted scoring\n  //\n  // Total = 100\n  // ----------------------------------------------------------\n\n  weights: {\n\n    structure: 20,\n\n    contentLength: 15,\n\n    securityDepth: 20,\n\n    technicalSpecificity: 15,\n\n    engagement: 10,\n\n    readability: 10,\n\n    originality: 5,\n\n    cveBonus: 5\n  }\n};\n\n\n// ============================================================\n// HELPERS\n// ============================================================\n\nfunction normalizeString(value) {\n\n  if (typeof value !== 'string') {\n    return '';\n  }\n\n  return value\n    .replace(/\\r\\n/g, '\\n')\n    .trim();\n}\n\n\n// ------------------------------------------------------------\n// Hashtags\n// ------------------------------------------------------------\n\nfunction normalizeHashtags(value) {\n\n  if (!Array.isArray(value)) {\n    return [];\n  }\n\n  return value\n    .map(tag => String(tag).trim())\n    .filter(Boolean)\n    .map(tag =>\n      tag.startsWith('#')\n        ? tag\n        : `#${tag}`\n    );\n}\n\n\n// ------------------------------------------------------------\n// Word count\n// ------------------------------------------------------------\n\nfunction countWords(text) {\n\n  if (!text) {\n    return 0;\n  }\n\n  return text\n    .trim()\n    .split(/\\s+/)\n    .filter(Boolean)\n    .length;\n}\n\n\n// ------------------------------------------------------------\n// CVE extraction\n// ------------------------------------------------------------\n\nfunction extractCVEs(text) {\n\n  if (!text) {\n    return [];\n  }\n\n  const matches =\n    text.match(/\\bCVE-\\d{4}-\\d{4,7}\\b/gi) || [];\n\n  return [\n    ...new Set(\n      matches.map(\n        cve => cve.toUpperCase()\n      )\n    )\n  ];\n}\n\n\n// ============================================================\n// SECURITY TERMINOLOGY\n// ============================================================\n\nfunction countSecurityTerms(text) {\n\n  if (!text) {\n    return 0;\n  }\n\n  const securityTerms = [\n\n    // Vulnerability\n    'vulnerability',\n    'vulnerabilities',\n    'CVE',\n    'CVSS',\n    'exploit',\n    'exploitation',\n\n    // Threat actors\n    'attacker',\n    'attack',\n    'remote attacker',\n    'local attacker',\n\n    // Identity / authorization\n    'authentication',\n    'authorization',\n    'access control',\n    'authentication boundary',\n    'authorization boundary',\n\n    // Privilege\n    'root',\n    'root access',\n    'root privileges',\n    'privilege',\n    'privilege escalation',\n    'least privilege',\n    'privilege separation',\n\n    // Network\n    'remote',\n    'local',\n    'network',\n    'network exposure',\n    'attack vector',\n    'attack complexity',\n\n    // Execution\n    'command execution',\n    'arbitrary command',\n    'arbitrary code execution',\n    'command injection',\n\n    // System\n    'kernel',\n    'daemon',\n    'setuid',\n    'debug',\n    'system compromise',\n\n    // Defensive\n    'hardening',\n    'mitigation',\n    'secure configuration',\n    'misconfiguration',\n\n    // Software weaknesses\n    'input validation',\n    'memory corruption',\n    'buffer overflow',\n\n    // CIA\n    'integrity',\n    'confidentiality',\n    'availability',\n\n    // Architecture\n    'trust boundary'\n  ];\n\n  const lower =\n    text.toLowerCase();\n\n  return securityTerms.filter(term =>\n    lower.includes(\n      term.toLowerCase()\n    )\n  ).length;\n}\n\n\n// ============================================================\n// EXPLOITATION / SAFETY DETECTION\n// ============================================================\n\nfunction detectExploitationClaim(text) {\n\n  if (!text) {\n    return false;\n  }\n\n  const lower =\n    text.toLowerCase();\n\n  const dangerousPatterns = [\n\n    'actively exploited',\n    'actively being exploited',\n    'currently exploited',\n    'currently being exploited',\n\n    'exploited in the wild',\n    'exploitation in the wild',\n\n    'under active exploitation',\n\n    'attackers are exploiting',\n    'attackers are actively exploiting',\n\n    'has been actively exploited',\n    'was actively exploited',\n\n    'currently under attack',\n\n    'being exploited right now'\n  ];\n\n  return dangerousPatterns.some(\n    pattern =>\n      lower.includes(pattern)\n  );\n}\n\n\n// ============================================================\n// GENERIC AI WRITING DETECTION\n// ============================================================\n\nfunction detectGenericPhrases(text) {\n\n  if (!text) {\n    return [];\n  }\n\n  const genericPatterns = [\n\n    'this vulnerability highlights the importance of',\n\n    'this vulnerability underscores the importance of',\n\n    'this highlights the importance of',\n\n    'this underscores the importance of',\n\n    'serves as a stark reminder',\n\n    'serves as a reminder of the importance',\n\n    'it is important to note that',\n\n    'in today’s rapidly evolving',\n\n    \"in today's rapidly evolving\",\n\n    'in the ever-evolving cybersecurity landscape',\n\n    'as we navigate the evolving',\n\n    'cybersecurity is more important than ever',\n\n    'in the modern cybersecurity landscape',\n\n    'this case study demonstrates the importance',\n\n    'this case study highlights the importance',\n\n    'in an increasingly connected world',\n\n    'in today’s digital landscape',\n\n    \"in today's digital landscape\"\n  ];\n\n  const lower =\n    text.toLowerCase();\n\n  return genericPatterns.filter(\n    pattern =>\n      lower.includes(\n        pattern.toLowerCase()\n      )\n  );\n}\n\n\n// ============================================================\n// ENGAGEMENT\n// ============================================================\n\nfunction hasDiscussionQuestion(text) {\n\n  if (!text) {\n    return false;\n  }\n\n  return (\n    text.includes('?') ||\n    text.includes('؟')\n  );\n}\n\n\nfunction hasHook(hook) {\n\n  return (\n    normalizeString(hook).length >=\n    CONFIG.minHookLength\n  );\n}\n\n\nfunction hasKeyTakeaway(keyTakeaway) {\n\n  return (\n    normalizeString(keyTakeaway).length >=\n    CONFIG.minTakeawayLength\n  );\n}\n\n\n// ============================================================\n// HASHTAG VALIDATION\n// ============================================================\n\nfunction validateHashtags(hashtags) {\n\n  if (!Array.isArray(hashtags)) {\n    return false;\n  }\n\n  if (\n    hashtags.length <\n      CONFIG.minHashtags ||\n    hashtags.length >\n      CONFIG.maxHashtags\n  ) {\n    return false;\n  }\n\n  return hashtags.every(tag => {\n\n    if (typeof tag !== 'string') {\n      return false;\n    }\n\n    const trimmed =\n      tag.trim();\n\n    return /^#[A-Za-z0-9_]+$/\n      .test(trimmed);\n  });\n}\n\n\n// ============================================================\n// TECHNICAL SPECIFICITY\n// ============================================================\n\nfunction calculateTechnicalSpecificity(\n  text,\n  metrics\n) {\n\n  if (!text) {\n    return 0;\n  }\n\n  let score = 0;\n\n\n  // ----------------------------------------------------------\n  // CVE identifier\n  // ----------------------------------------------------------\n\n  if (metrics.cveCount > 0) {\n    score += 25;\n  }\n\n\n  // ----------------------------------------------------------\n  // CVSS\n  // ----------------------------------------------------------\n\n  if (/\\bCVSS\\b/i.test(text)) {\n    score += 10;\n  }\n\n\n  // ----------------------------------------------------------\n  // Explicit technical command\n  //\n  // Example:\n  // CWD ~root\n  // chmod\n  // exec()\n  // setuid()\n  // etc.\n  // ----------------------------------------------------------\n\n  if (\n    /\\b[A-Za-z_][A-Za-z0-9_]*\\s*~\\s*[A-Za-z0-9_]+/\n      .test(text)\n  ) {\n    score += 15;\n  }\n\n\n  // ----------------------------------------------------------\n  // Unix paths\n  // ----------------------------------------------------------\n\n  if (\n    /\\/[A-Za-z0-9._~/-]+/\n      .test(text)\n  ) {\n    score += 10;\n  }\n\n\n  // ----------------------------------------------------------\n  // Version numbers\n  // ----------------------------------------------------------\n\n  if (\n    /\\b(?:version\\s*)?\\d+\\.\\d+(?:\\.\\d+)?(?:\\.\\d+)?\\b/i\n      .test(text)\n  ) {\n    score += 10;\n  }\n\n\n  // ----------------------------------------------------------\n  // Numeric technical values\n  //\n  // CVSS score, version, port, year, etc.\n  // ----------------------------------------------------------\n\n  if (\n    /\\b\\d+(?:\\.\\d+)?\\b/\n      .test(text)\n  ) {\n    score += 5;\n  }\n\n\n  // ----------------------------------------------------------\n  // Technical security vocabulary\n  // ----------------------------------------------------------\n\n  if (\n    metrics.securityTermCount >= 10\n  ) {\n\n    score += 25;\n\n  } else if (\n    metrics.securityTermCount >= 7\n  ) {\n\n    score += 20;\n\n  } else if (\n    metrics.securityTermCount >= 5\n  ) {\n\n    score += 12;\n  }\n\n\n  return Math.min(\n    100,\n    score\n  );\n}\n\n\n// ============================================================\n// READABILITY\n// ============================================================\n\nfunction calculateReadability(\n  text,\n  wordCount\n) {\n\n  if (\n    !text ||\n    wordCount === 0\n  ) {\n    return 0;\n  }\n\n  let score = 100;\n\n  const sentences =\n    text\n      .split(/[.!?؟]+/)\n      .filter(Boolean);\n\n  if (\n    sentences.length === 0\n  ) {\n    return 50;\n  }\n\n  const averageWordsPerSentence =\n    wordCount /\n    sentences.length;\n\n\n  // Very long sentences\n\n  if (\n    averageWordsPerSentence > 35\n  ) {\n\n    score -= 25;\n\n  } else if (\n    averageWordsPerSentence > 28\n  ) {\n\n    score -= 15;\n\n  } else if (\n    averageWordsPerSentence > 22\n  ) {\n\n    score -= 8;\n  }\n\n\n  // Fragmented writing\n\n  if (\n    averageWordsPerSentence < 7\n  ) {\n\n    score -= 15;\n  }\n\n\n  // Extremely dense paragraph\n\n  const paragraphs =\n    text\n      .split(/\\n\\s*\\n/)\n      .filter(Boolean);\n\n  if (\n    paragraphs.length === 1 &&\n    wordCount > 130\n  ) {\n\n    score -= 5;\n  }\n\n\n  return Math.max(\n    0,\n    Math.min(100, score)\n  );\n}\n\n\n// ============================================================\n// CONTENT LENGTH SCORE\n// ============================================================\n\nfunction calculateLengthScore(\n  postLength,\n  wordCount\n) {\n\n  let score = 100;\n\n\n  // Serious shortness\n\n  if (\n    postLength <\n    CONFIG.minPostLength\n  ) {\n\n    score -= 50;\n  }\n\n\n  // Word count\n\n  if (\n    wordCount <\n    CONFIG.minWordCount\n  ) {\n\n    score -= 30;\n  }\n\n\n  // Excessive length\n\n  if (\n    postLength >\n    CONFIG.maxPostLength\n  ) {\n\n    score -= 15;\n  }\n\n\n  // Slightly below recommended\n  // is NOT a serious problem.\n\n  if (\n    postLength >=\n      CONFIG.minPostLength &&\n    postLength <\n      CONFIG.recommendedPostLength\n  ) {\n\n    score -= 5;\n  }\n\n\n  if (\n    wordCount >=\n    CONFIG.recommendedWordCount &&\n    postLength >=\n    CONFIG.recommendedPostLength\n  ) {\n\n    score += 0;\n  }\n\n\n  return Math.max(\n    0,\n    Math.min(100, score)\n  );\n}\n\n\n// ============================================================\n// SECURITY DEPTH SCORE\n// ============================================================\n\nfunction calculateSecurityDepth(\n  metrics\n) {\n\n  const count =\n    metrics.securityTermCount;\n\n\n  if (count >= 12) {\n    return 100;\n  }\n\n  if (count >= 9) {\n    return 90;\n  }\n\n  if (count >= 7) {\n    return 80;\n  }\n\n  if (count >= 5) {\n    return 70;\n  }\n\n  if (count >= 3) {\n    return 50;\n  }\n\n  return 25;\n}\n\n\n// ============================================================\n// STRUCTURE SCORE\n// ============================================================\n\nfunction calculateStructureScore(\n  checks\n) {\n\n  let score = 0;\n\n  if (checks.has_post) {\n    score += 40;\n  }\n\n  if (checks.has_hook) {\n    score += 20;\n  }\n\n  if (checks.has_key_takeaway) {\n    score += 20;\n  }\n\n  if (checks.hashtags_valid) {\n    score += 20;\n  }\n\n  return Math.min(\n    100,\n    score\n  );\n}\n\n\n// ============================================================\n// ENGAGEMENT SCORE\n// ============================================================\n\nfunction calculateEngagementScore(\n  checks\n) {\n\n  let score = 0;\n\n\n  // Question is valuable,\n  // but NOT mandatory.\n\n  if (\n    checks.has_discussion_question\n  ) {\n\n    score += 70;\n  }\n\n\n  // Hook contributes to engagement.\n\n  if (\n    checks.has_hook\n  ) {\n\n    score += 30;\n  }\n\n\n  return Math.min(\n    100,\n    score\n  );\n}\n\n\n// ============================================================\n// ORIGINALITY SCORE\n// ============================================================\n\nfunction calculateOriginalityScore(\n  genericPhraseCount\n) {\n\n  if (\n    genericPhraseCount === 0\n  ) {\n    return 100;\n  }\n\n  if (\n    genericPhraseCount === 1\n  ) {\n    return 85;\n  }\n\n  if (\n    genericPhraseCount === 2\n  ) {\n    return 65;\n  }\n\n  if (\n    genericPhraseCount === 3\n  ) {\n    return 45;\n  }\n\n  return 25;\n}\n\n\n// ============================================================\n// MAIN PROCESS\n// ============================================================\n\nreturn items.map((item) => {\n\n  const raw =\n    item.json || {};\n\n\n  // ----------------------------------------------------------\n  // Resolve AI output\n  // ----------------------------------------------------------\n\n  const data =\n    raw.output &&\n    typeof raw.output === 'object' &&\n    !Array.isArray(raw.output)\n\n      ? raw.output\n\n      : raw;\n\n\n  // ----------------------------------------------------------\n  // Normalize\n  // ----------------------------------------------------------\n\n  const linkedin_post =\n    normalizeString(\n      data.linkedin_post\n    );\n\n  const hook =\n    normalizeString(\n      data.hook\n    );\n\n  const key_takeaway =\n    normalizeString(\n      data.key_takeaway\n    );\n\n  const hashtags =\n    normalizeHashtags(\n      data.hashtags\n    );\n\n\n  // ----------------------------------------------------------\n  // Combined text\n  // ----------------------------------------------------------\n\n  const combinedText =\n    `${linkedin_post} ${hook} ${key_takeaway}`;\n\n\n  // ----------------------------------------------------------\n  // Metrics\n  // ----------------------------------------------------------\n\n  const postLength =\n    linkedin_post.length;\n\n  const wordCount =\n    countWords(\n      linkedin_post\n    );\n\n  const cves =\n    extractCVEs(\n      combinedText\n    );\n\n  const cveCount =\n    cves.length;\n\n  const hashtagCount =\n    hashtags.length;\n\n  const securityTermCount =\n    countSecurityTerms(\n      combinedText\n    );\n\n\n  // ----------------------------------------------------------\n  // Checks\n  // ----------------------------------------------------------\n\n  const exploitationClaimDetected =\n    detectExploitationClaim(\n      combinedText\n    );\n\n  const detectedGenericPhrases =\n    detectGenericPhrases(\n      linkedin_post\n    );\n\n  const genericPhraseCount =\n    detectedGenericPhrases.length;\n\n  const discussionQuestion =\n    hasDiscussionQuestion(\n      linkedin_post\n    );\n\n  const hookValid =\n    hasHook(\n      hook\n    );\n\n  const keyTakeawayValid =\n    hasKeyTakeaway(\n      key_takeaway\n    );\n\n  const hashtagsValid =\n    validateHashtags(\n      hashtags\n    );\n\n\n  // ----------------------------------------------------------\n  // Structural checks\n  // ----------------------------------------------------------\n\n  const checks = {\n\n    has_post:\n      Boolean(linkedin_post),\n\n    has_hook:\n      hookValid,\n\n    has_key_takeaway:\n      keyTakeawayValid,\n\n    has_discussion_question:\n      discussionQuestion,\n\n    hashtags_valid:\n      hashtagsValid,\n\n    exploitation_claim_detected:\n      exploitationClaimDetected,\n\n    generic_phrase_count:\n      genericPhraseCount,\n\n    detected_generic_phrases:\n      detectedGenericPhrases\n  };\n\n\n  // ==========================================================\n  // HARD FAILURES\n  // ==========================================================\n\n  const hardFailures = [];\n\n\n  // Empty post\n\n  if (!linkedin_post) {\n\n    hardFailures.push(\n      'LinkedIn post is empty'\n    );\n  }\n\n\n  // Missing hook\n\n  if (!hook) {\n\n    hardFailures.push(\n      'Hook is missing'\n    );\n  }\n\n\n  // Missing takeaway\n\n  if (!key_takeaway) {\n\n    hardFailures.push(\n      'Key takeaway is missing'\n    );\n  }\n\n\n  // Hashtags must be an array\n\n  if (\n    !Array.isArray(\n      data.hashtags\n    )\n  ) {\n\n    hardFailures.push(\n      'Hashtags field must be an array'\n    );\n  }\n\n\n  // Serious short post\n\n  if (\n    linkedin_post &&\n    postLength <\n    CONFIG.minPostLength\n  ) {\n\n    hardFailures.push(\n      `Post is too short (${postLength} characters; minimum ${CONFIG.minPostLength})`\n    );\n  }\n\n\n  // Too few hashtags\n\n  if (\n    hashtagCount <\n    CONFIG.minHashtags\n  ) {\n\n    hardFailures.push(\n      `Fewer than ${CONFIG.minHashtags} hashtags`\n    );\n  }\n\n\n  // Too many hashtags\n\n  if (\n    hashtagCount >\n    CONFIG.maxHashtags\n  ) {\n\n    hardFailures.push(\n      `More than ${CONFIG.maxHashtags} hashtags`\n    );\n  }\n\n\n  // Invalid hashtags\n\n  if (\n    Array.isArray(\n      data.hashtags\n    ) &&\n    !hashtagsValid\n  ) {\n\n    hardFailures.push(\n      'One or more hashtags are invalid'\n    );\n  }\n\n\n  // Unsupported active exploitation claim\n\n  if (\n    exploitationClaimDetected\n  ) {\n\n    hardFailures.push(\n      'Potential unsupported active-exploitation claim detected'\n    );\n  }\n\n\n  // ==========================================================\n  // SOFT WARNINGS\n  // ==========================================================\n\n  const warnings = [];\n\n\n  // ----------------------------------------------------------\n  // CVE\n  //\n  // IMPORTANT:\n  // CVE is OPTIONAL.\n  // ----------------------------------------------------------\n\n  if (\n    cveCount === 0\n  ) {\n\n    warnings.push(\n      'No CVE identifier detected; CVE is optional for historical or non-CVE security content'\n    );\n  }\n\n\n  // ----------------------------------------------------------\n  // Word count\n  // ----------------------------------------------------------\n\n  if (\n    wordCount <\n    CONFIG.minWordCount\n  ) {\n\n    warnings.push(\n      `Post has low word count (${wordCount}; recommended minimum ${CONFIG.minWordCount})`\n    );\n  }\n\n\n  // ----------------------------------------------------------\n  // Security terminology\n  // ----------------------------------------------------------\n\n  if (\n    securityTermCount <\n    CONFIG.minSecurityTerms\n  ) {\n\n    warnings.push(\n      `Limited security-specific terminology detected (${securityTermCount})`\n    );\n  }\n\n\n  // ----------------------------------------------------------\n  // Discussion question\n  //\n  // WARNING ONLY\n  // ----------------------------------------------------------\n\n  if (\n    !discussionQuestion\n  ) {\n\n    warnings.push(\n      'Post does not contain a discussion question'\n    );\n  }\n\n\n  // ----------------------------------------------------------\n  // Hook\n  // ----------------------------------------------------------\n\n  if (\n    !hookValid\n  ) {\n\n    warnings.push(\n      'Hook may be too short'\n    );\n  }\n\n\n  // ----------------------------------------------------------\n  // Takeaway\n  // ----------------------------------------------------------\n\n  if (\n    !keyTakeawayValid\n  ) {\n\n    warnings.push(\n      'Key takeaway may be too short'\n    );\n  }\n\n\n  // ----------------------------------------------------------\n  // Generic AI writing\n  // ----------------------------------------------------------\n\n  if (\n    genericPhraseCount >\n    CONFIG.maxGenericPhrasesBeforePenalty\n  ) {\n\n    warnings.push(\n      `${genericPhraseCount} generic AI-style phrase(s) detected`\n    );\n  }\n\n\n  // ----------------------------------------------------------\n  // Excessive length\n  // ----------------------------------------------------------\n\n  if (\n    postLength >\n    CONFIG.maxPostLength\n  ) {\n\n    warnings.push(\n      `Post is longer than recommended maximum (${postLength} characters)`\n    );\n  }\n\n\n  // ==========================================================\n  // SCORING ENGINE\n  // ==========================================================\n\n  const structureScore =\n    calculateStructureScore(\n      checks\n    );\n\n\n  const lengthScore =\n    calculateLengthScore(\n      postLength,\n      wordCount\n    );\n\n\n  const securityDepthScore =\n    calculateSecurityDepth({\n      securityTermCount\n    });\n\n\n  const technicalSpecificityScore =\n    calculateTechnicalSpecificity(\n      combinedText,\n      {\n        cveCount,\n        securityTermCount\n      }\n    );\n\n\n  const engagementScore =\n    calculateEngagementScore(\n      checks\n    );\n\n\n  const readabilityScore =\n    calculateReadability(\n      linkedin_post,\n      wordCount\n    );\n\n\n  const originalityScore =\n    calculateOriginalityScore(\n      genericPhraseCount\n    );\n\n\n  // ----------------------------------------------------------\n  // CVE BONUS\n  //\n  // CVE is never required.\n  // ----------------------------------------------------------\n\n  const cveBonus =\n    cveCount > 0\n      ? 100\n      : 0;\n\n\n  // ==========================================================\n  // WEIGHTED SCORE\n  // ==========================================================\n\n  const weightedScores = {\n\n    structure:\n      structureScore *\n      (CONFIG.weights.structure / 100),\n\n    content_length:\n      lengthScore *\n      (CONFIG.weights.contentLength / 100),\n\n    security_depth:\n      securityDepthScore *\n      (CONFIG.weights.securityDepth / 100),\n\n    technical_specificity:\n      technicalSpecificityScore *\n      (CONFIG.weights.technicalSpecificity / 100),\n\n    engagement:\n      engagementScore *\n      (CONFIG.weights.engagement / 100),\n\n    readability:\n      readabilityScore *\n      (CONFIG.weights.readability / 100),\n\n    originality:\n      originalityScore *\n      (CONFIG.weights.originality / 100),\n\n    cve_bonus:\n      cveBonus *\n      (CONFIG.weights.cveBonus / 100)\n  };\n\n\n  // ----------------------------------------------------------\n  // Base score\n  // ----------------------------------------------------------\n\n  let score =\n    Object.values(\n      weightedScores\n    ).reduce(\n      (sum, value) =>\n        sum + value,\n      0\n    );\n\n\n  // ==========================================================\n  // PENALTIES\n  // ==========================================================\n\n  // Generic AI-style writing\n\n  score -= Math.min(\n    genericPhraseCount * 3,\n    9\n  );\n\n\n  // Unsupported active exploitation claim\n\n  if (\n    exploitationClaimDetected\n  ) {\n\n    score -= 30;\n  }\n\n\n  // Clamp and round\n\n  score =\n    Math.round(\n      Math.max(\n        0,\n        Math.min(\n          100,\n          score\n        )\n      )\n    );\n\n\n  // ==========================================================\n  // FINAL DECISION\n  // ==========================================================\n\n  let status;\n\n\n  if (\n    hardFailures.length > 0\n  ) {\n\n    status = 'REJECT';\n\n  } else if (\n    score < CONFIG.reviewScore\n  ) {\n\n    status = 'REJECT';\n\n  } else if (\n    score < CONFIG.passScore\n  ) {\n\n    status = 'REVIEW';\n\n  } else {\n\n    status = 'PASS';\n  }\n\n\n  // ==========================================================\n  // SCORE BREAKDOWN\n  // ==========================================================\n\n  const scoreBreakdown = {\n\n    structure:\n      Math.round(\n        weightedScores.structure\n      ),\n\n    content_length:\n      Math.round(\n        weightedScores.content_length\n      ),\n\n    security_depth:\n      Math.round(\n        weightedScores.security_depth\n      ),\n\n    technical_specificity:\n      Math.round(\n        weightedScores.technical_specificity\n      ),\n\n    engagement:\n      Math.round(\n        weightedScores.engagement\n      ),\n\n    readability:\n      Math.round(\n        weightedScores.readability\n      ),\n\n    originality:\n      Math.round(\n        weightedScores.originality\n      ),\n\n    cve_bonus:\n      Math.round(\n        weightedScores.cve_bonus\n      )\n  };\n\n\n  // ==========================================================\n  // FINAL OUTPUT\n  // ==========================================================\n\n  return {\n\n    json: {\n\n      linkedin_post,\n\n      hook,\n\n      key_takeaway,\n\n      hashtags,\n\n\n      quality_gate: {\n\n        status,\n\n        quality_score:\n          score,\n\n\n        score_breakdown:\n          scoreBreakdown,\n\n\n        thresholds: {\n\n          pass:\n            CONFIG.passScore,\n\n          review:\n            CONFIG.reviewScore,\n\n          reject:\n            `< ${CONFIG.reviewScore}`\n        },\n\n\n        metrics: {\n\n          post_length:\n            postLength,\n\n          word_count:\n            wordCount,\n\n          hashtag_count:\n            hashtagCount,\n\n          cve_count:\n            cveCount,\n\n          cves,\n\n          security_term_count:\n            securityTermCount\n        },\n\n\n        checks,\n\n\n        hard_failures:\n          hardFailures,\n\n\n        issues:\n          hardFailures,\n\n\n        warnings\n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        -576
+      ],
+      "id": "3876748a-638e-4843-a534-9ca00c92b983",
+      "name": "Content Quality Gate"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ForgeX4 Temporal State Management (Perimeter Filter)\n// Enforces O(1) lookups to prevent duplicate vulnerability reporting\n\nconst staticData = $getWorkflowStaticData('global');\nstaticData.processedEvents = staticData.processedEvents || [];\n\n// ⚠️ DEVELOPER OVERRIDE: \n// Uncomment the line below while testing to wipe the memory clean on every run.\n// staticData.processedEvents = []; \n\nconst MAX_HISTORY = 1000; \nconst uniqueItems = [];\n\nfor (const item of $input.all()) {\n  // We grab the ID directly from the source now\n  const eventId = item.json.event_id;\n  \n  if (!eventId) continue; // Drop malformed state\n\n  if (!staticData.processedEvents.includes(eventId)) {\n    // Event is novel; append to ledger and pass through\n    staticData.processedEvents.push(eventId);\n    uniqueItems.push(item);\n  }\n}\n\n// Prune historical state to prevent memory overflow\nif (staticData.processedEvents.length > MAX_HISTORY) {\n  staticData.processedEvents = staticData.processedEvents.slice(-MAX_HISTORY);\n}\n\nreturn uniqueItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        -144
+      ],
+      "id": "7cfaa25a-78a5-49e7-bc3a-7db484b0c5c3",
+      "name": "Temporal State Management"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.quality_gate.status }}",
+                    "rightValue": "PASS",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "12a98274-4a2a-4fb5-ae6e-c1e837121fc9"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "59fb4a6b-384b-4fe8-9c71-7d4d84a9ea4c",
+                    "leftValue": "={{ $json.quality_gate.status }}",
+                    "rightValue": "REVIEW",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "f9e5ded7-7628-4eae-ae1d-4264374dd9e5",
+                    "leftValue": "={{ $json.quality_gate.status }}",
+                    "rightValue": "REJECT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": 2
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        3744,
+        -576
+      ],
+      "id": "62947d22-be8c-4a1e-a15c-d5d4aeb3ec28",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ntfy.sh/forgex4-sentinel-review-k8x9",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "==⚠️ ForgeX4 Sentinel Review Required\nScore: {{ $json.quality_gate.quality_score }}\nWarnings: {{ $json.quality_gate.warnings.join(', ') }}\n\nDraft:\n{{ $json.linkedin_post }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        4304,
+        -560
+      ],
+      "id": "13679033-45bc-4e05-99ba-732f120fd0e5",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "person": "H3WpSFj7r-",
+        "text": "=={{ $json.linkedin_post }}\n\n{{ $json.hashtags.join(' ') }}\n\n{{ $now }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [
+        3968,
+        -688
+      ],
+      "id": "eac85e78-7fab-4955-a0ef-73dc2abd51be",
+      "name": "Create a post",
+      "credentials": {
+        "linkedInOAuth2Api": {
+          "id": "459LLhBniuw0Rqqq",
+          "name": "LinkedIn account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2704,
+        -496
+      ],
+      "id": "0e624188-9737-4fa7-bfd1-f9639ec28cbe",
+      "name": "Wait",
+      "webhookId": "fa040cac-c20e-4239-aca6-e6db98d7d3bb"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "CISA Security Advisories",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "NVD Vulnerability Intelligence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CISA Security Advisories": {
+      "main": [
+        [
+          {
+            "node": "Normalize Security Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Security Event": {
+      "main": [
+        [
+          {
+            "node": "Merge Security Intelligence",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "NVD Vulnerability Intelligence": {
+      "main": [
+        [
+          {
+            "node": "Split NVD Vulnerabilities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split NVD Vulnerabilities": {
+      "main": [
+        [
+          {
+            "node": "Normalize NVD Vulnerability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize NVD Vulnerability": {
+      "main": [
+        [
+          {
+            "node": "Merge Security Intelligence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Security Intelligence": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Temporal State Management",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deterministic Risk Assessment": {
+      "main": [
+        [
+          {
+            "node": "AI Analysis Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Security Analyst": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Analysis Gate": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Security Intelligence Ranking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Security Intelligence Ranking": {
+      "main": [
+        [
+          {
+            "node": "Top N",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn Content Gate": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "LinkedIn Content Generator",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LinkedIn Content Generator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Top N": {
+      "main": [
+        [
+          {
+            "node": "LinkedIn Content Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn Content Generator": {
+      "main": [
+        [
+          {
+            "node": "Content Quality Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Quality Gate": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Temporal State Management": {
+      "main": [
+        [
+          {
+            "node": "Deterministic Risk Assessment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Create a post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "LinkedIn Content Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "c5aa5c51-dbc1-450e-9617-d4ea0ee0544b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ff6bc22626dabb7339694fdccd300e07e209c21fc5b6f262e85afe6b1a7f0bad"
+  },
+  "nodeGroups": [],
+  "id": "b60LeO4OYEfnh26D",
+  "tags": []
+}
